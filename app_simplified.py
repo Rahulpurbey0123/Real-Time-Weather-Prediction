@@ -15,7 +15,7 @@ from functools import wraps
 
 # Import configuration
 try:
-    import config
+    import config   
     API_KEY = config.OPENWEATHERMAP_API_KEY
     CURRENT_WEATHER_URL = config.CURRENT_WEATHER_URL
     FORECAST_URL = config.FORECAST_URL
@@ -23,7 +23,7 @@ try:
     CACHE_TIMEOUT = config.CACHE_TIMEOUT
 except (ImportError, AttributeError):
     # Default values if config is not available
-    API_KEY = "6faaaa0aaaa5d6b70c5984a7a64fbd46"  # Replace with your actual API key
+    API_KEY = "e7a55d50b3e75a22479897fcc557a05b"  # Replace with your actual API key
     CURRENT_WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
     FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
     UNITS = "metric"
