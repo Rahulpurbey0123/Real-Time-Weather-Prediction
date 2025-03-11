@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Real-Time Weather Prediction
 
 This application provides real-time weather predictions using data from the OpenWeatherMap API, enhanced with advanced prediction algorithms.
@@ -84,3 +85,7 @@ CACHE_TIMEOUT = 600  # 10 minutes
 ## Note
 
 This application uses the free tier of OpenWeatherMap API, which has a limit of 60 calls per minute or 1,000,000 calls per month. The caching mechanism helps stay within these limits. 
+=======
+# Real-Time-Weather-Prediction
+This application provides real-time weather predictions using data from the OpenWeatherMap API, enhanced with advanced prediction algorithms.
+>>>>>>> 645794b96a470d72ee72979743a4edbeb27fad5f
