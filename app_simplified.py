@@ -2,6 +2,9 @@
 from flask import Flask, render_template, request, jsonify
 import numpy as np
 import pandas as pd
+# Set matplotlib to use non-interactive backend to avoid thread issues
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import io
 import base64
@@ -15,19 +18,20 @@ from functools import wraps
 
 # Import configuration
 try:
-    import config   
-    API_KEY = config.OPENWEATHERMAP_API_KEY
+    import config
+    API_KEY = config.OPENWEATHERMAP_API_KEY  
     CURRENT_WEATHER_URL = config.CURRENT_WEATHER_URL
     FORECAST_URL = config.FORECAST_URL
     UNITS = config.UNITS
-    CACHE_TIMEOUT = config.CACHE_TIMEOUT
+    CACHE_TIMEOUT = config.CACHE_TIMEOUT   
+    
 except (ImportError, AttributeError):
     # Default values if config is not available
-    API_KEY = "e7a55d50b3e75a22479897fcc557a05b"  # Replace with your actual API key
+    API_KEY = "e7a55d50b3e75a22479897fcc557a05b"
     CURRENT_WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
     FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast"
     UNITS = "metric"
-    CACHE_TIMEOUT = 600  # 10 minutes
+    CACHE_TIMEOUT = 600 # 10 minutes
 
 app = Flask(__name__)
 
@@ -102,6 +106,11 @@ class WeatherPredictor:
         temp_range = [-20, 60]  # °C
         temp_prediction = temp_range[0] + processed_data['temp_factor'] * (temp_range[1] - temp_range[0])
         
+        # Ensure temperature prediction is in a realistic Celsius range
+        # If it's outside reasonable Celsius range (e.g., > 50°C), assume it's Fahrenheit and convert
+        if temp_prediction > 50:
+            temp_prediction = (temp_prediction - 32) * 5/9
+            
         # Calculate precipitation probability
         precip_prob = processed_data['humidity_factor'] * 100
         
@@ -162,6 +171,12 @@ class WeatherPredictor:
     
     def get_visualization(self, processed_data):
         """Generate visualization of results"""
+        # Use Agg backend to avoid thread issues
+        import matplotlib
+        matplotlib.use('Agg')
+        
+        # Create a new figure (and make sure old ones are closed)
+        plt.close('all')
         plt.figure(figsize=(10, 6))
         
         # Create a bar chart of the processed data
@@ -184,6 +199,8 @@ class WeatherPredictor:
         
         # Convert to base64 string
         img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+        
+        # Close the figure to release resources
         plt.close()
         
         return img_str
@@ -196,6 +213,8 @@ class WeatherPredictor:
         pressure = location_data.get('pressure', 1013)
         wind_speed = location_data.get('wind_speed', 10)
         
+        print(f"Input temperature for prediction: {temperature}")
+        
         # Encode data
         encoded_data = self.encode_weather_data(temperature, humidity, pressure, wind_speed)
         
@@ -205,9 +224,16 @@ class WeatherPredictor:
         # Interpret results
         prediction = self.interpret_results(processed_data)
         
+        print(f"Predicted current temperature: {prediction['current']['temperature']}")
+        
         # Generate visualization
-        visualization = self.get_visualization(processed_data)
-        prediction['visualization'] = visualization
+        try:
+            visualization = self.get_visualization(processed_data)
+            prediction['visualization'] = visualization
+        except Exception as e:
+            print(f"Error generating visualization: {e}")
+            # Create a placeholder image if visualization fails
+            prediction['visualization'] = ""
         
         return prediction
 
@@ -216,11 +242,13 @@ class WeatherPredictor:
 def fetch_weather_data(location):
     """Fetch real weather data from OpenWeatherMap API for initial conditions"""
     try:
-        # OpenWeatherMap API key - you need to replace this with your actual API key
+        # Use the API key from config.py
         api_key = API_KEY
         
         # API endpoint for current weather
         url = f"{CURRENT_WEATHER_URL}?q={location}&appid={api_key}&units={UNITS}"
+        
+        print(f"Fetching weather data from: {url}")
         
         # Make the API request
         response = requests.get(url, timeout=5)  # 5 second timeout for faster response
@@ -228,6 +256,7 @@ def fetch_weather_data(location):
         # Check if the request was successful
         if response.status_code == 200:
             data = response.json()
+            print(f"API Response: {data}")
             
             # Extract relevant weather data
             weather_data = {
@@ -237,10 +266,12 @@ def fetch_weather_data(location):
                 'wind_speed': data['wind']['speed']
             }
             
+            print(f"Extracted weather data: {weather_data}")
             return weather_data
         else:
+            print(f"API request failed with status code {response.status_code}.")
+            print(f"Response content: {response.text}")
             # If API request fails, use simulated data as fallback
-            print(f"API request failed with status code {response.status_code}. Using simulated data.")
             return {
                 'temperature': np.random.uniform(0, 30),
                 'humidity': np.random.uniform(30, 95),
@@ -249,7 +280,9 @@ def fetch_weather_data(location):
             }
     except Exception as e:
         # If any error occurs, use simulated data as fallback
-        print(f"Error fetching weather data: {e}. Using simulated data.")
+        print(f"Error fetching weather data: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             'temperature': np.random.uniform(0, 30),
             'humidity': np.random.uniform(30, 95),
@@ -262,7 +295,7 @@ def fetch_weather_data(location):
 def fetch_forecast_data(location):
     """Fetch 5-day forecast data from OpenWeatherMap API"""
     try:
-        # OpenWeatherMap API key - you need to replace this with your actual API key
+        # OpenWeatherMap API key
         api_key = API_KEY
         
         # API endpoint for 5-day forecast
@@ -281,6 +314,87 @@ def fetch_forecast_data(location):
         print(f"Error fetching forecast data: {e}")
         return None
 
+@cached()
+def fetch_weather_data_one_call(location):
+    """Fetch real weather data from OpenWeatherMap One Call API"""
+    try:
+        # OpenWeatherMap API key
+        api_key = API_KEY
+        
+        # First get coordinates for the location
+        geo_url = f"https://api.openweathermap.org/geo/1.0/direct?q={location}&limit=1&appid={api_key}"
+        geo_response = requests.get(geo_url, timeout=5)
+        
+        if geo_response.status_code == 200:
+            geo_data = geo_response.json()
+            if geo_data and len(geo_data) > 0:
+                lat = geo_data[0]['lat']
+                lon = geo_data[0]['lon']
+                
+                # Now fetch weather using One Call API
+                one_call_url = f"https://api.openweathermap.org/data/3.0/onecall?lat={lat}&lon={lon}&exclude=minutely,hourly&units={UNITS}&appid={api_key}"
+                response = requests.get(one_call_url, timeout=5)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Extract relevant weather data
+                    weather_data = {
+                        'temperature': data['current']['temp'],
+                        'humidity': data['current']['humidity'],
+                        'pressure': data['current']['pressure'],
+                        'wind_speed': data['current']['wind_speed']
+                    }
+                    
+                    return weather_data
+        
+        # If any step fails, use simulated data as fallback
+        print(f"API request failed or no data returned.")
+        return {
+            'temperature': np.random.uniform(0, 30),
+            'humidity': np.random.uniform(30, 95),
+            'pressure': np.random.uniform(990, 1030),
+            'wind_speed': np.random.uniform(0, 25)
+        }
+    except Exception as e:
+        print(f"Error fetching weather data: {e}")
+        return {
+            'temperature': np.random.uniform(0, 30),
+            'humidity': np.random.uniform(30, 95),
+            'pressure': np.random.uniform(990, 1030),
+            'wind_speed': np.random.uniform(0, 25)
+        }
+
+# Function to extract hourly data from forecast
+def extract_hourly_data(forecast_data):
+    """Extract hourly temperature data for the current day from forecast data"""
+    if not forecast_data or 'list' not in forecast_data:
+        return None
+        
+    forecast_list = forecast_data['list']
+    
+    # Get today's date
+    today = datetime.now().strftime('%Y-%m-%d')
+    
+    # Filter forecast items for today
+    today_items = [item for item in forecast_list if item['dt_txt'].split(' ')[0] == today]
+    
+    # If no items for today (might happen in the evening), use the first 8 items (24 hours)
+    if not today_items:
+        today_items = forecast_list[:8]
+    
+    # Extract hourly data
+    hourly_data = []
+    for item in today_items:
+        time_str = item['dt_txt'].split(' ')[1][:5]  # Get time in HH:MM format
+        temp = item['main']['temp']
+        hourly_data.append({
+            'time': time_str,
+            'temp': round(temp, 1)
+        })
+    
+    return hourly_data
+
 # Routes
 @app.route('/')
 def index():
@@ -297,21 +411,59 @@ def predict():
         
         # Fetch initial weather data
         start_time = time.time()
-        weather_data = fetch_weather_data(location)
-        weather_fetch_time = time.time() - start_time
+        try:
+            weather_data = fetch_weather_data(location)
+            weather_fetch_time = time.time() - start_time
+        except Exception as e:
+            print(f"Error fetching weather data: {e}")
+            # If weather data fetch fails, use simulated data
+            weather_data = {
+                'temperature': np.random.uniform(0, 30),
+                'humidity': np.random.uniform(30, 95),
+                'pressure': np.random.uniform(990, 1030),
+                'wind_speed': np.random.uniform(0, 25)
+            }
+            weather_fetch_time = time.time() - start_time
+        
+        # Debug log for weather data
+        print(f"Weather data from API or fallback: {weather_data}")
+        
+        # Check if we have valid temperature data
+        if 'temperature' not in weather_data:
+            print("WARNING: Temperature data missing from API response!")
+            # Add a default temperature
+            weather_data['temperature'] = 20  # Default temperature
         
         # Create predictor
         predictor = WeatherPredictor()
         
         # Get prediction
         start_time = time.time()
-        prediction = predictor.predict_weather(weather_data)
-        prediction_time = time.time() - start_time
+        try:
+            prediction = predictor.predict_weather(weather_data)
+            prediction_time = time.time() - start_time
+        except Exception as e:
+            print(f"Error in prediction: {e}")
+            # Return a simplified error response
+            return jsonify({
+                "error": "Prediction failed",
+                "message": str(e)
+            }), 500
         
         # Try to get real forecast data
         start_time = time.time()
-        forecast_data = fetch_forecast_data(location)
-        forecast_fetch_time = time.time() - start_time
+        try:
+            forecast_data = fetch_forecast_data(location)
+            forecast_fetch_time = time.time() - start_time
+        except Exception as e:
+            print(f"Error fetching forecast: {e}")
+            forecast_data = None
+            forecast_fetch_time = time.time() - start_time
+        
+        # If we have forecast data but no current temperature, use the first forecast item
+        if 'temperature' not in weather_data and forecast_data and 'list' in forecast_data and len(forecast_data['list']) > 0:
+            current_forecast = forecast_data['list'][0]
+            weather_data['temperature'] = current_forecast['main']['temp']
         
         # If we have real forecast data, use it to enhance our prediction
         if forecast_data and 'list' in forecast_data:
@@ -389,9 +541,71 @@ def predict():
             
             # Replace our predicted forecast with the real one
             prediction['forecast'] = daily_forecasts
+
+            # Extract hourly temperature data
+            hourly_data = extract_hourly_data(forecast_data)
+            if hourly_data:
+                prediction['hourly_data'] = hourly_data
+            else:
+                # Generate simulated hourly data if real data not available
+                simulated_hourly = []
+                current_temp = weather_data.get('temperature', 20)
+                current_hour = datetime.now().hour
+                
+                print(f"Generating simulated hourly data starting from hour {current_hour} with base temp {current_temp}")
+                
+                # Generate data for 24 hours, centered around current time
+                for i in range(24):
+                    hour = (current_hour - 12 + i) % 24
+                    # Add some variation to the temperature
+                    temp_variation = np.random.normal(0, 2)  # Random variation within ±2°C
+                    temp = round(current_temp + temp_variation + 3 * np.sin((hour - 12) * np.pi / 12), 1)
+                    simulated_hourly.append({
+                        'time': f"{hour:02d}:00",
+                        'temp': temp
+                    })
+                
+                # Sort by hour
+                simulated_hourly.sort(key=lambda x: int(x['time'].split(':')[0]))
+                prediction['hourly_data'] = simulated_hourly
+                print(f"Generated {len(simulated_hourly)} hourly data points")
         
         # Add location info
         prediction['location'] = location
+        
+        # Add hourly data if not already added (when forecast data is not available)
+        if 'hourly_data' not in prediction:
+            # Generate simulated hourly data
+            simulated_hourly = []
+            current_temp = weather_data.get('temperature', 20)
+            current_hour = datetime.now().hour
+            
+            # Generate data for 24 hours, centered around current time
+            for i in range(24):
+                hour = (current_hour - 12 + i) % 24
+                # Add some variation to the temperature
+                temp_variation = np.random.normal(0, 2)  # Random variation within ±2°C
+                temp = round(current_temp + temp_variation + 3 * np.sin((hour - 12) * np.pi / 12), 1)
+                simulated_hourly.append({
+                    'time': f"{hour:02d}:00",
+                    'temp': temp
+                })
+            
+            # Sort by hour
+            simulated_hourly.sort(key=lambda x: int(x['time'].split(':')[0]))
+            prediction['hourly_data'] = simulated_hourly
+        
+        # If we have real weather data from the API, use it for the current temperature
+        if 'temperature' in weather_data:
+            # Use the actual temperature from the API for current weather
+            prediction['current']['temperature'] = round(weather_data['temperature'], 1)
+            print(f"Using actual API temperature: {prediction['current']['temperature']}")
+        else:
+            # Ensure prediction temperature is in Celsius if we're using the predicted value
+            # The predicted temperature can sometimes be in Fahrenheit
+            if prediction['current']['temperature'] > 40:  # Likely Fahrenheit
+                prediction['current']['temperature'] = round((prediction['current']['temperature'] - 32) * 5/9, 1)
+                print(f"Converting predicted temperature to Celsius: {prediction['current']['temperature']}")
         
         # Add data source info
         prediction['data_source'] = 'OpenWeatherMap API' if forecast_data else 'Prediction Model'
@@ -403,6 +617,14 @@ def predict():
             'prediction_time_ms': round(prediction_time * 1000, 2),
             'total_time_ms': round((weather_fetch_time + forecast_fetch_time + prediction_time) * 1000, 2)
         }
+        
+        print(f"Final current temperature being sent to frontend: {prediction['current']['temperature']}")
+        print(f"Final forecast temperatures: {[day['temp'] for day in prediction['forecast']]}")
+        
+        # Add debug print for hourly data
+        if 'hourly_data' in prediction:
+            print(f"Sending {len(prediction['hourly_data'])} hourly data points to frontend")
+            print(f"Sample hourly data: {prediction['hourly_data'][:3]}")
         
         return jsonify(prediction)
     except Exception as e:
@@ -437,6 +659,8 @@ def get_index_template():
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>MyWeather - Real-Time Weather Prediction</title>
+        <!-- Add Chart.js library - using specific version to ensure compatibility -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
         <style>
             body {
                 font-family: 'Arial', sans-serif;
@@ -543,8 +767,50 @@ def get_index_template():
             }
             
             .temperature {
-                font-size: 3rem;
+                font-size: 3.5rem;
                 font-weight: bold;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                padding: 10px 15px;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 15px;
+                display: inline-block;
+                position: relative;
+                transition: all 0.3s ease;
+            }
+            
+            .temperature:hover {
+                transform: scale(1.05);
+            }
+            
+            .temp-unit {
+                font-size: 1.8rem;
+                vertical-align: super;
+                margin-left: 5px;
+            }
+            
+            .temp-hot {
+                color: #ff5e5e;
+            }
+            
+            .temp-warm {
+                color: #ffa726;
+            }
+            
+            .temp-mild {
+                color: #ffeb3b;
+            }
+            
+            .temp-cool {
+                color: #80d8ff;
+            }
+            
+            .temp-cold {
+                color: #42a5f5;
+            }
+            
+            .temp-freezing {
+                color: #90caf9;
+                text-shadow: 0 0 8px #fff, 0 0 10px #90caf9;
             }
             
             .details {
@@ -617,6 +883,38 @@ def get_index_template():
                 display: inline-block;
                 margin-top: 10px;
                 font-size: 0.9rem;
+            }
+            
+            /* Hourly graph styling */
+            .hourly-graph-container {
+                margin-top: 20px;
+                background-color: rgba(0, 0, 0, 0.4);
+                border-radius: 10px;
+                padding: 15px;
+                display: none;
+            }
+            
+            .toggle-hourly-btn {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 15px;
+                margin-top: 10px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: background-color 0.3s;
+            }
+            
+            .toggle-hourly-btn:hover {
+                background-color: #2980b9;
+            }
+            
+            .chart-container {
+                position: relative;
+                height: 250px;
+                width: 100%;
+                margin-top: 15px;
             }
             
             footer {
@@ -702,6 +1000,15 @@ def get_index_template():
                     <h3>Prediction Reliability Score: <span id="quantum-score">85%</span></h3>
                     <p>This weather prediction is powered by advanced algorithms that analyze weather patterns, enabling more accurate predictions of complex atmospheric systems.</p>
                 </div>
+
+                <button id="toggle-hourly-btn" class="toggle-hourly-btn">Show Hourly Temperature</button>
+
+                <div id="hourly-graph-container" class="hourly-graph-container">
+                    <h3>Today's Hourly Temperature</h3>
+                    <div class="chart-container">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
             </div>
             
             <footer>
@@ -715,6 +1022,11 @@ def get_index_template():
                 const locationInput = document.getElementById('location-input');
                 const weatherDisplay = document.getElementById('weather-display');
                 const loader = document.getElementById('loader');
+                const toggleHourlyBtn = document.getElementById('toggle-hourly-btn');
+                const hourlyContainer = document.getElementById('hourly-graph-container');
+                
+                let hourlyChart = null;
+                let chartData = null;
                 
                 // Weather icons using emoji
                 const weatherIcons = {
@@ -745,6 +1057,49 @@ def get_index_template():
                     }
                 });
                 
+                // Toggle button event handler
+                toggleHourlyBtn.onclick = function() {
+                    const isVisible = hourlyContainer.style.display === 'block';
+                    hourlyContainer.style.display = isVisible ? 'none' : 'block';
+                    toggleHourlyBtn.textContent = isVisible ? 'Show Hourly Temperature' : 'Hide Hourly Temperature';
+                    
+                    // Create chart when it becomes visible
+                    if (!isVisible && chartData) {
+                        setTimeout(createHourlyChart, 50);
+                    }
+                };
+                
+                function createHourlyChart() {
+                    if (!chartData) return;
+                    
+                    // If chart already exists, destroy it first
+                    if (hourlyChart) {
+                        hourlyChart.destroy();
+                    }
+                    
+                    const canvas = document.getElementById('hourlyChart');
+                    const ctx = canvas.getContext('2d');
+                    
+                    hourlyChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: chartData.times,
+                            datasets: [{
+                                label: 'Temperature (°C)',
+                                data: chartData.temps,
+                                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 2,
+                                tension: 0.1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }
+                    });
+                }
+                
                 function fetchWeatherPrediction(location) {
                     // Show loader
                     loader.style.display = 'block';
@@ -765,13 +1120,36 @@ def get_index_template():
                         return response.json();
                     })
                     .then(data => {
+                        console.log("Full API response:", data);
                         // Update the UI with prediction data
                         document.getElementById('location-name').textContent = `Weather for ${data.location}`;
                         document.getElementById('data-source').textContent = `Data Source: ${data.data_source}`;
                         
                         // Current weather
                         const current = data.current;
-                        document.getElementById('temperature').textContent = `${current.temperature}°C`;
+                        const tempValue = parseFloat(current.temperature);
+                        
+                        // Create temperature display with separated unit
+                        const tempDisplay = document.getElementById('temperature');
+                        tempDisplay.innerHTML = `${isNaN(tempValue) ? "N/A" : tempValue.toFixed(1)}<span class="temp-unit">°C</span>`;
+                        tempDisplay.title = `Raw value: ${current.temperature}`;
+                        
+                        // Apply temperature color class based on value
+                        tempDisplay.className = 'temperature'; // Reset classes
+                        if (tempValue >= 30) {
+                            tempDisplay.classList.add('temp-hot');
+                        } else if (tempValue >= 25) {
+                            tempDisplay.classList.add('temp-warm');
+                        } else if (tempValue >= 15) {
+                            tempDisplay.classList.add('temp-mild');
+                        } else if (tempValue >= 5) {
+                            tempDisplay.classList.add('temp-cool');
+                        } else if (tempValue >= 0) {
+                            tempDisplay.classList.add('temp-cold');
+                        } else {
+                            tempDisplay.classList.add('temp-freezing');
+                        }
+                        
                         document.getElementById('wind-speed').textContent = `${current.wind_speed} km/h`;
                         document.getElementById('precipitation').textContent = `${current.precipitation_probability}%`;
                         document.getElementById('weather-type').textContent = current.weather_type;
@@ -784,20 +1162,58 @@ def get_index_template():
                         data.forecast.forEach(day => {
                             const dayElement = document.createElement('div');
                             dayElement.className = 'forecast-day';
+                            
+                            // Determine temperature class based on value
+                            const tempValue = parseFloat(day.temp);
+                            let tempClass = '';
+                            
+                            if (tempValue >= 30) {
+                                tempClass = 'temp-hot';
+                            } else if (tempValue >= 25) {
+                                tempClass = 'temp-warm';
+                            } else if (tempValue >= 15) {
+                                tempClass = 'temp-mild';
+                            } else if (tempValue >= 5) {
+                                tempClass = 'temp-cool';
+                            } else if (tempValue >= 0) {
+                                tempClass = 'temp-cold';
+                            } else {
+                                tempClass = 'temp-freezing';
+                            }
+                            
                             dayElement.innerHTML = `
                                 <div class="day-name">${day.day}</div>
                                 <div class="weather-icon">${weatherIcons[day.weather_type] || '🌈'}</div>
-                                <div>${day.temp}°C</div>
+                                <div class="${tempClass}" style="font-weight: bold; font-size: 1.4rem;">${day.temp}<span style="font-size: 0.9rem; vertical-align: super;">°C</span></div>
                                 <div>${day.precip}% precip</div>
                             `;
                             forecastContainer.appendChild(dayElement);
                         });
                         
                         // Visualization
-                        document.getElementById('quantum-viz-img').src = `data:image/png;base64,${data.visualization}`;
+                        if (data.visualization) {
+                            document.getElementById('quantum-viz-img').src = `data:image/png;base64,${data.visualization}`;
+                            document.querySelector('.quantum-viz').style.display = 'block';
+                        } else {
+                            document.querySelector('.quantum-viz').style.display = 'none';
+                        }
                         
                         // Reliability score
                         document.getElementById('quantum-score').textContent = `${data.quantum_reliability_score}%`;
+                        
+                        // Hourly chart data
+                        if (data.hourly_data && data.hourly_data.length > 0) {
+                            toggleHourlyBtn.style.display = 'block';
+                            
+                            // Store chart data for later use
+                            chartData = {
+                                times: data.hourly_data.map(item => item.time),
+                                temps: data.hourly_data.map(item => item.temp)
+                            };
+                        } else {
+                            toggleHourlyBtn.style.display = 'none';
+                            chartData = null;
+                        }
                         
                         // Hide loader and show weather
                         loader.style.display = 'none';

@@ -216,10 +216,10 @@ def fetch_weather_data(location):
     # For demonstration, we'll simulate a response
     
     # In a real application, you would use:
-    # api_key = "your_api_key"
-    # url = f"https://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
-    # response = requests.get(url)
-    # data = response.json()
+    api_key = "e7a55d50b3e75a22479897fcc557a05b"
+    url = f"https://api.openweathermap.org/data/2.5/weather?q={location}&appid={api_key}&units=metric"
+    response = requests.get(url)
+    data = response.json()
     
     # Simulated response
     simulated_data = {

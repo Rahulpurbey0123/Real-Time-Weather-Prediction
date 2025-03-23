@@ -5,6 +5,8 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>MyWeather - Real-Time Weather Prediction</title>
+        <!-- Add Chart.js library - using specific version to ensure compatibility -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
         <style>
             body {
                 font-family: 'Arial', sans-serif;
@@ -111,8 +113,50 @@
             }
             
             .temperature {
-                font-size: 3rem;
+                font-size: 3.5rem;
                 font-weight: bold;
+                text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+                padding: 10px 15px;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 15px;
+                display: inline-block;
+                position: relative;
+                transition: all 0.3s ease;
+            }
+            
+            .temperature:hover {
+                transform: scale(1.05);
+            }
+            
+            .temp-unit {
+                font-size: 1.8rem;
+                vertical-align: super;
+                margin-left: 5px;
+            }
+            
+            .temp-hot {
+                color: #ff5e5e;
+            }
+            
+            .temp-warm {
+                color: #ffa726;
+            }
+            
+            .temp-mild {
+                color: #ffeb3b;
+            }
+            
+            .temp-cool {
+                color: #80d8ff;
+            }
+            
+            .temp-cold {
+                color: #42a5f5;
+            }
+            
+            .temp-freezing {
+                color: #90caf9;
+                text-shadow: 0 0 8px #fff, 0 0 10px #90caf9;
             }
             
             .details {
@@ -185,6 +229,38 @@
                 display: inline-block;
                 margin-top: 10px;
                 font-size: 0.9rem;
+            }
+            
+            /* Hourly graph styling */
+            .hourly-graph-container {
+                margin-top: 20px;
+                background-color: rgba(0, 0, 0, 0.4);
+                border-radius: 10px;
+                padding: 15px;
+                display: none;
+            }
+            
+            .toggle-hourly-btn {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 15px;
+                margin-top: 10px;
+                cursor: pointer;
+                font-size: 14px;
+                transition: background-color 0.3s;
+            }
+            
+            .toggle-hourly-btn:hover {
+                background-color: #2980b9;
+            }
+            
+            .chart-container {
+                position: relative;
+                height: 250px;
+                width: 100%;
+                margin-top: 15px;
             }
             
             footer {
@@ -270,6 +346,15 @@
                     <h3>Prediction Reliability Score: <span id="quantum-score">85%</span></h3>
                     <p>This weather prediction is powered by advanced algorithms that analyze weather patterns, enabling more accurate predictions of complex atmospheric systems.</p>
                 </div>
+
+                <button id="toggle-hourly-btn" class="toggle-hourly-btn">Show Hourly Temperature</button>
+
+                <div id="hourly-graph-container" class="hourly-graph-container">
+                    <h3>Today's Hourly Temperature</h3>
+                    <div class="chart-container">
+                        <canvas id="hourlyChart"></canvas>
+                    </div>
+                </div>
             </div>
             
             <footer>
@@ -283,6 +368,11 @@
                 const locationInput = document.getElementById('location-input');
                 const weatherDisplay = document.getElementById('weather-display');
                 const loader = document.getElementById('loader');
+                const toggleHourlyBtn = document.getElementById('toggle-hourly-btn');
+                const hourlyContainer = document.getElementById('hourly-graph-container');
+                
+                let hourlyChart = null;
+                let chartData = null;
                 
                 // Weather icons using emoji
                 const weatherIcons = {
@@ -313,6 +403,49 @@
                     }
                 });
                 
+                // Toggle button event handler
+                toggleHourlyBtn.onclick = function() {
+                    const isVisible = hourlyContainer.style.display === 'block';
+                    hourlyContainer.style.display = isVisible ? 'none' : 'block';
+                    toggleHourlyBtn.textContent = isVisible ? 'Show Hourly Temperature' : 'Hide Hourly Temperature';
+                    
+                    // Create chart when it becomes visible
+                    if (!isVisible && chartData) {
+                        setTimeout(createHourlyChart, 50);
+                    }
+                };
+                
+                function createHourlyChart() {
+                    if (!chartData) return;
+                    
+                    // If chart already exists, destroy it first
+                    if (hourlyChart) {
+                        hourlyChart.destroy();
+                    }
+                    
+                    const canvas = document.getElementById('hourlyChart');
+                    const ctx = canvas.getContext('2d');
+                    
+                    hourlyChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: chartData.times,
+                            datasets: [{
+                                label: 'Temperature (°C)',
+                                data: chartData.temps,
+                                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 2,
+                                tension: 0.1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }
+                    });
+                }
+                
                 function fetchWeatherPrediction(location) {
                     // Show loader
                     loader.style.display = 'block';
@@ -333,13 +466,36 @@
                         return response.json();
                     })
                     .then(data => {
+                        console.log("Full API response:", data);
                         // Update the UI with prediction data
                         document.getElementById('location-name').textContent = `Weather for ${data.location}`;
                         document.getElementById('data-source').textContent = `Data Source: ${data.data_source}`;
                         
                         // Current weather
                         const current = data.current;
-                        document.getElementById('temperature').textContent = `${current.temperature}°C`;
+                        const tempValue = parseFloat(current.temperature);
+                        
+                        // Create temperature display with separated unit
+                        const tempDisplay = document.getElementById('temperature');
+                        tempDisplay.innerHTML = `${isNaN(tempValue) ? "N/A" : tempValue.toFixed(1)}<span class="temp-unit">°C</span>`;
+                        tempDisplay.title = `Raw value: ${current.temperature}`;
+                        
+                        // Apply temperature color class based on value
+                        tempDisplay.className = 'temperature'; // Reset classes
+                        if (tempValue >= 30) {
+                            tempDisplay.classList.add('temp-hot');
+                        } else if (tempValue >= 25) {
+                            tempDisplay.classList.add('temp-warm');
+                        } else if (tempValue >= 15) {
+                            tempDisplay.classList.add('temp-mild');
+                        } else if (tempValue >= 5) {
+                            tempDisplay.classList.add('temp-cool');
+                        } else if (tempValue >= 0) {
+                            tempDisplay.classList.add('temp-cold');
+                        } else {
+                            tempDisplay.classList.add('temp-freezing');
+                        }
+                        
                         document.getElementById('wind-speed').textContent = `${current.wind_speed} km/h`;
                         document.getElementById('precipitation').textContent = `${current.precipitation_probability}%`;
                         document.getElementById('weather-type').textContent = current.weather_type;
@@ -352,20 +508,58 @@
                         data.forecast.forEach(day => {
                             const dayElement = document.createElement('div');
                             dayElement.className = 'forecast-day';
+                            
+                            // Determine temperature class based on value
+                            const tempValue = parseFloat(day.temp);
+                            let tempClass = '';
+                            
+                            if (tempValue >= 30) {
+                                tempClass = 'temp-hot';
+                            } else if (tempValue >= 25) {
+                                tempClass = 'temp-warm';
+                            } else if (tempValue >= 15) {
+                                tempClass = 'temp-mild';
+                            } else if (tempValue >= 5) {
+                                tempClass = 'temp-cool';
+                            } else if (tempValue >= 0) {
+                                tempClass = 'temp-cold';
+                            } else {
+                                tempClass = 'temp-freezing';
+                            }
+                            
                             dayElement.innerHTML = `
                                 <div class="day-name">${day.day}</div>
                                 <div class="weather-icon">${weatherIcons[day.weather_type] || '🌈'}</div>
-                                <div>${day.temp}°C</div>
+                                <div class="${tempClass}" style="font-weight: bold; font-size: 1.4rem;">${day.temp}<span style="font-size: 0.9rem; vertical-align: super;">°C</span></div>
                                 <div>${day.precip}% precip</div>
                             `;
                             forecastContainer.appendChild(dayElement);
                         });
                         
                         // Visualization
-                        document.getElementById('quantum-viz-img').src = `data:image/png;base64,${data.visualization}`;
+                        if (data.visualization) {
+                            document.getElementById('quantum-viz-img').src = `data:image/png;base64,${data.visualization}`;
+                            document.querySelector('.quantum-viz').style.display = 'block';
+                        } else {
+                            document.querySelector('.quantum-viz').style.display = 'none';
+                        }
                         
                         // Reliability score
                         document.getElementById('quantum-score').textContent = `${data.quantum_reliability_score}%`;
+                        
+                        // Hourly chart data
+                        if (data.hourly_data && data.hourly_data.length > 0) {
+                            toggleHourlyBtn.style.display = 'block';
+                            
+                            // Store chart data for later use
+                            chartData = {
+                                times: data.hourly_data.map(item => item.time),
+                                temps: data.hourly_data.map(item => item.temp)
+                            };
+                        } else {
+                            toggleHourlyBtn.style.display = 'none';
+                            chartData = null;
+                        }
                         
                         // Hide loader and show weather
                         loader.style.display = 'none';
