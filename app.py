@@ -207,6 +207,47 @@ class QuantumWeatherPredictor:
         visualization = self.get_visualization(counts)
         prediction['visualization'] = visualization
         
+        # Generate simulated hourly data
+        simulated_hourly = []
+        current_temp = temperature
+        base_temp = current_temp
+        
+        # Fixed time points for every 6 hours
+        time_points = [
+            {'hour': 0, 'label': '00:00'},
+            {'hour': 6, 'label': '06:00'},
+            {'hour': 12, 'label': '12:00'},
+            {'hour': 18, 'label': '18:00'},
+            {'hour': 24, 'label': '24:00'}
+        ]
+        
+        # Get current hour to adjust temperature variations realistically
+        current_hour = datetime.now().hour
+        
+        # Generate temperature data for each interval
+        for point in time_points:
+            hour = point['hour']
+            
+            # Temperature variation based on time of day
+            # Maximum at 14:00 (2 PM), minimum at 02:00 (2 AM)
+            time_factor = np.cos(((hour - 14) % 24) * np.pi / 12)
+            base_variation = -5 * time_factor  # More pronounced temperature variation
+            
+            # Add some random variation (smaller range for more realistic changes)
+            random_variation = np.random.normal(0, 0.5)
+            
+            # Calculate final temperature
+            temp = round(base_temp + base_variation + random_variation, 1)
+            
+            # Add data point
+            simulated_hourly.append({
+                'time': point['label'],
+                'temp': temp
+            })
+        
+        print("Generated hourly data:", simulated_hourly)  # Debug print
+        prediction['hourly_data'] = simulated_hourly
+        
         return prediction
 
 # Function to fetch real weather data

@@ -1,4 +1,3 @@
-
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -351,6 +350,14 @@
 
                 <div id="hourly-graph-container" class="hourly-graph-container">
                     <h3>Today's Hourly Temperature</h3>
+                    <div style="margin-bottom: 10px;">
+                        <button id="toggle-time-format" class="toggle-hourly-btn" style="margin-right: 10px;">
+                            Switch Time Format
+                        </button>
+                        <button id="toggle-temp-unit" class="toggle-hourly-btn">
+                            Switch to °F
+                        </button>
+                    </div>
                     <div class="chart-container">
                         <canvas id="hourlyChart"></canvas>
                     </div>
@@ -370,9 +377,80 @@
                 const loader = document.getElementById('loader');
                 const toggleHourlyBtn = document.getElementById('toggle-hourly-btn');
                 const hourlyContainer = document.getElementById('hourly-graph-container');
+                const toggleTimeFormatBtn = document.getElementById('toggle-time-format');
+                const toggleTempUnitBtn = document.getElementById('toggle-temp-unit');
                 
                 let hourlyChart = null;
                 let chartData = null;
+                let using24HourFormat = true;
+                let usingCelsius = true;
+                
+                // Function to convert Celsius to Fahrenheit
+                function celsiusToFahrenheit(celsius) {
+                    return (celsius * 9/5) + 32;
+                }
+
+                // Function to convert Fahrenheit to Celsius
+                function fahrenheitToCelsius(fahrenheit) {
+                    return (fahrenheit - 32) * 5/9;
+                }
+
+                // Add time format toggle handler
+                toggleTimeFormatBtn.addEventListener('click', function() {
+                    using24HourFormat = !using24HourFormat;
+                    toggleTimeFormatBtn.textContent = using24HourFormat ? 'Switch to 12h' : 'Switch to 24h';
+                    
+                    if (chartData && hourlyChart) {
+                        const formattedTimes = chartData.times.map(timePoint => {
+                            const hour = parseInt(timePoint);
+                            if (using24HourFormat) {
+                                return `${hour.toString().padStart(2, '0')}:00`;
+                            } else {
+                                if (hour === 0 || hour === 24) return '12:00 AM';
+                                if (hour === 12) return '12:00 PM';
+                                return `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+                            }
+                        });
+                        
+                        hourlyChart.data.labels = formattedTimes;
+                        hourlyChart.update('none');
+                    }
+                });
+
+                // Add temperature unit toggle handler
+                toggleTempUnitBtn.addEventListener('click', function() {
+                    usingCelsius = !usingCelsius;
+                    toggleTempUnitBtn.textContent = usingCelsius ? 'Switch to °F' : 'Switch to °C';
+                    
+                    if (chartData && hourlyChart) {
+                        // Convert temperatures based on the original Celsius data
+                        const newTemps = chartData.temps.map(temp => 
+                            usingCelsius ? temp : celsiusToFahrenheit(temp)
+                        );
+                        
+                        hourlyChart.data.datasets[0].data = newTemps;
+                        hourlyChart.data.datasets[0].label = `Temperature (°${usingCelsius ? 'C' : 'F'})`;
+                        
+                        // Update y-axis configuration
+                        hourlyChart.options.scales.y.ticks.callback = function(value) {
+                            return value.toFixed(1) + `°${usingCelsius ? 'C' : 'F'}`;
+                        };
+                        
+                        // Update tooltip
+                        hourlyChart.options.plugins.tooltip.callbacks.label = function(context) {
+                            return `Temperature: ${context.raw.toFixed(1)}°${usingCelsius ? 'C' : 'F'}`;
+                        };
+                        
+                        // Update y-axis range
+                        const minTemp = Math.min(...newTemps);
+                        const maxTemp = Math.max(...newTemps);
+                        hourlyChart.options.scales.y.suggestedMin = minTemp - 2;
+                        hourlyChart.options.scales.y.suggestedMax = maxTemp + 2;
+                        
+                        // Force chart update
+                        hourlyChart.update('none');
+                    }
+                });
                 
                 // Weather icons using emoji
                 const weatherIcons = {
@@ -426,24 +504,216 @@
                     const canvas = document.getElementById('hourlyChart');
                     const ctx = canvas.getContext('2d');
                     
+                    // Format times based on current format setting
+                    const times = chartData.times.map(timePoint => {
+                        const hour = parseInt(timePoint);
+                        if (using24HourFormat) {
+                            return `${hour.toString().padStart(2, '0')}:00`;
+                        } else {
+                            if (hour === 0 || hour === 24) return '12:00 AM';
+                            if (hour === 12) return '12:00 PM';
+                            return `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+                        }
+                    });
+                    
+                    // Convert temperatures if needed
+                    const temps = chartData.temps.map(temp => 
+                        usingCelsius ? temp : celsiusToFahrenheit(temp)
+                    );
+
+                    console.log('Creating chart with data:', { times, temps });
+                    
                     hourlyChart = new Chart(ctx, {
                         type: 'line',
                         data: {
-                            labels: chartData.times,
+                            labels: times,
                             datasets: [{
-                                label: 'Temperature (°C)',
-                                data: chartData.temps,
-                                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                label: `Temperature (°${usingCelsius ? 'C' : 'F'})`,
+                                data: temps,
+                                backgroundColor: (context) => {
+                                    const chart = context.chart;
+                                    const {ctx, chartArea} = chart;
+                                    if (!chartArea) {
+                                        return null;
+                                    }
+                                    const gradient = ctx.createLinearGradient(0, chartArea.bottom, 0, chartArea.top);
+                                    gradient.addColorStop(0, 'rgba(255, 99, 132, 0.0)');
+                                    gradient.addColorStop(1, 'rgba(255, 99, 132, 0.3)');
+                                    return gradient;
+                                },
                                 borderColor: 'rgba(255, 99, 132, 1)',
-                                borderWidth: 2,
-                                tension: 0.1
+                                borderWidth: 4,
+                                tension: 0.4,
+                                fill: true,
+                                pointRadius: 6,
+                                pointBackgroundColor: 'rgba(255, 99, 132, 1)',
+                                pointBorderColor: 'white',
+                                pointBorderWidth: 3,
+                                pointHoverRadius: 8,
+                                pointHoverBackgroundColor: 'white',
+                                pointHoverBorderColor: 'rgba(255, 99, 132, 1)',
+                                pointHoverBorderWidth: 4,
+                                spanGaps: false
                             }]
                         },
                         options: {
                             responsive: true,
-                            maintainAspectRatio: false
+                            maintainAspectRatio: false,
+                            layout: {
+                                padding: {
+                                    left: 20,
+                                    right: 20,
+                                    top: 30,
+                                    bottom: 10
+                                }
+                            },
+                            interaction: {
+                                mode: 'index',
+                                intersect: false
+                            },
+                            scales: {
+                                x: {
+                                    type: 'category',
+                                    grid: {
+                                        color: 'rgba(255, 255, 255, 0.1)',
+                                        display: true,
+                                        drawBorder: false
+                                    },
+                                    ticks: {
+                                        color: 'rgba(255, 255, 255, 0.8)',
+                                        font: {
+                                            size: 14,
+                                            weight: '600'
+                                        },
+                                        maxRotation: 0,
+                                        minRotation: 0,
+                                        padding: 10,
+                                        autoSkip: false
+                                    },
+                                    display: true,
+                                    offset: true
+                                },
+                                y: {
+                                    grid: {
+                                        color: 'rgba(255, 255, 255, 0.1)',
+                                        display: true,
+                                        drawBorder: false
+                                    },
+                                    border: {
+                                        dash: [4, 4]
+                                    },
+                                    ticks: {
+                                        color: 'rgba(255, 255, 255, 0.8)',
+                                        font: {
+                                            size: 14,
+                                            weight: '600'
+                                        },
+                                        padding: 10,
+                                        callback: function(value) {
+                                            return value.toFixed(1) + `°${usingCelsius ? 'C' : 'F'}`;
+                                        }
+                                    },
+                                    display: true,
+                                    beginAtZero: false,
+                                    suggestedMin: Math.min(...temps) - 2,
+                                    suggestedMax: Math.max(...temps) + 2
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    labels: {
+                                        color: 'rgba(255, 255, 255, 0.9)',
+                                        font: {
+                                            size: 14,
+                                            weight: '600'
+                                        },
+                                        usePointStyle: true,
+                                        pointStyle: 'circle'
+                                    }
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    titleFont: {
+                                        size: 16,
+                                        weight: '600'
+                                    },
+                                    bodyFont: {
+                                        size: 14
+                                    },
+                                    padding: 12,
+                                    cornerRadius: 8,
+                                    displayColors: false,
+                                    callbacks: {
+                                        label: function(context) {
+                                            return `Temperature: ${context.raw.toFixed(1)}°${usingCelsius ? 'C' : 'F'}`;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     });
+                }
+                
+                // Function to convert time format
+                function convertTimeFormat(time) {
+                    if (!time) return '';
+                    const hour = parseInt(time);
+                    if (using24HourFormat) {
+                        return `${hour.toString().padStart(2, '0')}:00`;
+                    } else {
+                        if (hour === 0 || hour === 24) return '12:00 AM';
+                        if (hour === 12) return '12:00 PM';
+                        return `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+                    }
+                }
+                
+                // Update the data processing when receiving API response
+                function processHourlyData(data) {
+                    if (data.hourly_data && data.hourly_data.length > 0) {
+                        toggleHourlyBtn.style.display = 'block';
+                        
+                        // Store the raw data in Celsius (original format)
+                        chartData = {
+                            originalData: data.hourly_data,  // Keep original data
+                            times: ['00:00', '06:00', '12:00', '18:00', '24:00'],
+                            temps: ['00:00', '06:00', '12:00', '18:00', '24:00'].map(timePoint => {
+                                const dataPoint = data.hourly_data.find(d => d.time === timePoint);
+                                if (dataPoint) {
+                                    return parseFloat(dataPoint.temp);
+                                }
+                                // Interpolate if point doesn't exist
+                                const hour = parseInt(timePoint);
+                                const prevPoint = data.hourly_data.reduce((prev, curr) => {
+                                    const currHour = parseInt(curr.time);
+                                    return currHour < hour && (!prev || parseInt(prev.time) < currHour) ? curr : prev;
+                                }, null);
+                                const nextPoint = data.hourly_data.reduce((next, curr) => {
+                                    const currHour = parseInt(curr.time);
+                                    return currHour > hour && (!next || parseInt(next.time) > currHour) ? curr : next;
+                                }, null);
+                                
+                                if (prevPoint && nextPoint) {
+                                    const prevTemp = parseFloat(prevPoint.temp);
+                                    const nextTemp = parseFloat(nextPoint.temp);
+                                    return (prevTemp + nextTemp) / 2;
+                                }
+                                return prevPoint ? parseFloat(prevPoint.temp) : 
+                                       nextPoint ? parseFloat(nextPoint.temp) : 
+                                       parseFloat(data.hourly_data[0].temp);
+                            })
+                        };
+                        
+                        console.log('Processed Chart Data:', chartData);
+                        
+                        // If the hourly container is visible, update the chart
+                        if (hourlyContainer.style.display === 'block') {
+                            createHourlyChart();
+                        }
+                    } else {
+                        toggleHourlyBtn.style.display = 'none';
+                        chartData = null;
+                    }
                 }
                 
                 function fetchWeatherPrediction(location) {
@@ -547,19 +817,8 @@
                         // Reliability score
                         document.getElementById('quantum-score').textContent = `${data.quantum_reliability_score}%`;
                         
-                        // Hourly chart data
-                        if (data.hourly_data && data.hourly_data.length > 0) {
-                            toggleHourlyBtn.style.display = 'block';
-                            
-                            // Store chart data for later use
-                            chartData = {
-                                times: data.hourly_data.map(item => item.time),
-                                temps: data.hourly_data.map(item => item.temp)
-                            };
-                        } else {
-                            toggleHourlyBtn.style.display = 'none';
-                            chartData = null;
-                        }
+                        // Process hourly data
+                        processHourlyData(data);
                         
                         // Hide loader and show weather
                         loader.style.display = 'none';
@@ -580,4 +839,3 @@
         </script>
     </body>
     </html>
-    
